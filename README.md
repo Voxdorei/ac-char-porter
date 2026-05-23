@@ -3,7 +3,7 @@
 Move an offline AzerothCore WotLK character between private servers with a
 portable JSON bundle.
 
-This is **not live sync**. It is a manual checkout/import tool for small groups
+This is **not live sync**. It is a manual export/import tool for small groups
 who each host their own server but sometimes want to bring a character to a
 friend's realm.
 
@@ -40,8 +40,11 @@ Skipped by design in this first version:
 - Always run import with `--dry-run` first.
 - The safest real import is with the destination `ac-worldserver` stopped.
 - If importing while the worldserver is running, use `--allow-live-import`.
-- Do not play the same character on two servers at once.
-- Keep the parked checkout copy until the imported copy is confirmed in game.
+- Do not play the same character on two servers at once unless you are willing
+  to overwrite one timeline later.
+- Use `--backup-existing` when importing over a character name that already
+  exists.
+- Keep parked backup copies until the imported copy is confirmed in game.
 - Participating servers should use compatible AzerothCore schemas, modules, and
   world data.
 
@@ -61,9 +64,11 @@ If `acchar` is not on your PATH, run commands as:
 python -m ac_char_porter --help
 ```
 
-## Recommended Workflow
+## Recommended Workflow: Backup And Overwrite
 
 Example story: Pete wants to move `Potato` from his server to Greg's server.
+Both servers may already have a local `Potato`. The tool can park the existing
+local copy before importing the incoming one.
 
 ### 1. Back Up The Source Server
 
@@ -77,8 +82,8 @@ mysqldump -u root -p acore_auth > acore_auth-before-transfer.sql
 
 ### 2. Create A Holding Account
 
-Checkout parks the source character on a holding account so nobody accidentally
-keeps playing the old copy.
+Backup/overwrite parks the previous local copy on a holding account before
+importing the incoming character.
 
 Create a normal AzerothCore account, lock it, and note its account id. You can
 also create it with your usual server tooling or GM commands.
@@ -89,7 +94,22 @@ The examples below use:
 holding account id: 99
 ```
 
-### 3. Export And Checkout The Character
+### 3. Export The Character
+
+```powershell
+acchar export `
+  --host pete-server `
+  --user root `
+  --password "password" `
+  --database acore_characters `
+  --character "Potato" `
+  --out .\bundles\Potato-to-Greg.acchar.json
+```
+
+This does not change Pete's server. It only creates the bundle.
+
+If you want to make sure nobody can keep playing Pete's local `Potato`, use
+checkout:
 
 ```powershell
 acchar export `
@@ -103,7 +123,7 @@ acchar export `
   --holding-account 99
 ```
 
-After this:
+After checkout:
 
 - `Potato-to-Greg.acchar.json` contains the portable character bundle.
 - `Potato` is no longer on Pete's normal account.
@@ -130,6 +150,8 @@ acchar import `
   --bundle .\bundles\Potato-to-Greg.acchar.json `
   --account 7 `
   --name "Potato" `
+  --backup-existing `
+  --holding-account 99 `
   --dry-run
 ```
 
@@ -157,6 +179,8 @@ acchar import `
   --bundle .\bundles\Potato-to-Greg.acchar.json `
   --account 7 `
   --name "Potato" `
+  --backup-existing `
+  --holding-account 99 `
   --worldserver-stopped
 ```
 
@@ -180,6 +204,8 @@ acchar import `
   --bundle .\bundles\Potato-to-Greg.acchar.json `
   --account 7 `
   --name "Potato" `
+  --backup-existing `
+  --holding-account 99 `
   --allow-live-import
 ```
 
@@ -203,9 +229,9 @@ Log into the destination account and check:
 - action bars look reasonable
 - no unexpected mail/guild/auction state is expected
 
-### 9. Clean Up The Parked Copy
+### 9. Clean Up Parked Copies
 
-Only purge the parked source copy after the imported character works in game.
+Only purge parked backup copies after the imported character works in game.
 
 Dry-run first:
 
@@ -283,6 +309,17 @@ Real imports require one of:
 
 Dry-runs do not require either flag.
 
+Use this when importing over a name that may already exist on the target
+account:
+
+```text
+--backup-existing --holding-account ACCOUNT_ID
+```
+
+If the target character exists, it is moved to the holding account with a backup
+name such as `Bkp1y3`, then the incoming bundle is imported under the requested
+name.
+
 ### Purge
 
 ```powershell
@@ -291,7 +328,8 @@ acchar purge --help
 
 ## Current Limitations
 
-- No merge logic. One character timeline should be active at a time.
+- No merge logic. Backup/overwrite preserves the old local copy, but it does
+  not combine progress from two timelines.
 - No live sync service.
 - Mail, auctions, guilds, arena teams, pets, social lists, and instance binds
   are not portable yet.

@@ -40,6 +40,9 @@ class CharacterNameTests(unittest.TestCase):
         with self.assertRaises(PorterError):
             validate_character_name("Test1")
 
+    def test_accepts_twelve_letter_names(self):
+        validate_character_name("Exportcopy")
+
 
 if __name__ == "__main__":
     unittest.main()

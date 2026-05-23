@@ -38,6 +38,15 @@ class CheckoutResult:
 
 
 @dataclass(frozen=True)
+class BackupResult:
+    guid: int
+    original_account: int
+    original_name: str
+    holding_account: int
+    backup_name: str
+
+
+@dataclass(frozen=True)
 class PurgeResult:
     guid: int
     name: str
@@ -131,8 +140,32 @@ def checkout_character(conn, *, guid: int, holding_account: int) -> CheckoutResu
     )
 
 
-def available_parked_name(conn, guid: int) -> str:
-    stem = f"Xfer{to_base36(guid)}"[:12]
+def backup_existing_character(conn, *, account: int, name: str, holding_account: int) -> BackupResult | None:
+    try:
+        character = find_character(conn, name=name, account=account)
+    except PorterError as exc:
+        if str(exc) == "No matching character found":
+            return None
+        raise
+
+    guid = int(character["guid"])
+    backup_name = available_parked_name(conn, guid, prefix="Bkp")
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE `characters` SET `account` = %s, `name` = %s, `online` = 0 WHERE `guid` = %s",
+            (holding_account, backup_name, guid),
+        )
+    return BackupResult(
+        guid=guid,
+        original_account=int(character["account"]),
+        original_name=str(character["name"]),
+        holding_account=holding_account,
+        backup_name=backup_name,
+    )
+
+
+def available_parked_name(conn, guid: int, *, prefix: str = "Xfer") -> str:
+    stem = f"{prefix}{to_base36(guid)}"[:12]
     candidate = stem
     suffix = 1
     while character_name_exists(conn, candidate):
@@ -162,12 +195,14 @@ def create_import_plan(
     target_name: str | None = None,
     live_import: bool = False,
     guid_gap: int = 0,
+    allow_existing_target: bool = False,
 ) -> ImportPlan:
     source = bundle["character"]
     source_guid = int(source["guid"])
     name = target_name or source["name"]
     validate_character_name(name)
-    ensure_character_name_available(conn, name)
+    if not allow_existing_target:
+        ensure_character_name_available(conn, name)
     char_minimum = max_existing_id(conn, "characters", "guid") + guid_gap + 1 if live_import else None
     target_guid = next_integer_id(conn, "characters", "guid", 1, minimum=char_minimum)[0]
     item_count = len(bundle["tables"].get(ITEM_INSTANCE_TABLE, []))
@@ -193,7 +228,11 @@ def import_character(
     dry_run: bool = False,
     live_import: bool = False,
     guid_gap: int = 0,
+    backup_existing: bool = False,
+    holding_account: int | None = None,
 ) -> ImportPlan:
+    if backup_existing and holding_account is None:
+        raise PorterError("backup_existing requires holding_account")
     plan = create_import_plan(
         conn,
         bundle,
@@ -201,6 +240,7 @@ def import_character(
         target_name=target_name,
         live_import=live_import,
         guid_gap=guid_gap,
+        allow_existing_target=backup_existing,
     )
     item_rows = bundle["tables"].get(ITEM_INSTANCE_TABLE, [])
     item_minimum = max_existing_id(conn, ITEM_INSTANCE_TABLE, "guid") + guid_gap + 1 if live_import else None
@@ -210,6 +250,14 @@ def import_character(
     item_map = {int(row["guid"]): new_id for row, new_id in zip(item_rows, new_item_ids)}
 
     try:
+        if backup_existing:
+            backup_existing_character(
+                conn,
+                account=target_account,
+                name=plan.target_name,
+                holding_account=holding_account,
+            )
+            ensure_character_name_available(conn, plan.target_name)
         insert_character_row(conn, bundle["character"], plan)
         for row in item_rows:
             insert_item_row(conn, row, plan.source_guid, plan.target_guid, item_map)

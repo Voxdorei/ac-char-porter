@@ -60,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help=f"GUID guard gap for --allow-live-import. Default: {LIVE_IMPORT_GUID_GAP}.",
     )
+    importer.add_argument(
+        "--backup-existing",
+        action="store_true",
+        help="If the target character exists on the target account, park it on a holding account before import.",
+    )
+    importer.add_argument("--holding-account", type=int, help="Account id used to hold backup/parked characters.")
     importer.set_defaults(func=run_import)
 
     purge = subcommands.add_parser("purge", help="Hard-delete a local parked character copy by GUID.")
@@ -139,6 +145,8 @@ def run_import(args: argparse.Namespace) -> int:
         raise PorterError("Use either --worldserver-stopped or --allow-live-import, not both")
     if args.guid_gap < 0:
         raise PorterError("--guid-gap must be zero or greater")
+    if args.backup_existing and args.holding_account is None:
+        raise PorterError("--backup-existing requires --holding-account")
     if not args.dry_run and not args.worldserver_stopped and not args.allow_live_import:
         raise PorterError(
             "Refusing real import unless --worldserver-stopped or --allow-live-import is provided. "
@@ -154,6 +162,7 @@ def run_import(args: argparse.Namespace) -> int:
                 target_name=args.name,
                 live_import=args.allow_live_import,
                 guid_gap=args.guid_gap if args.allow_live_import else 0,
+                allow_existing_target=args.backup_existing,
             )
             print("Dry-run plan:")
             print(describe_plan(plan))
@@ -165,6 +174,8 @@ def run_import(args: argparse.Namespace) -> int:
                 dry_run=True,
                 live_import=args.allow_live_import,
                 guid_gap=args.guid_gap if args.allow_live_import else 0,
+                backup_existing=args.backup_existing,
+                holding_account=args.holding_account,
             )
             print("Dry-run insert completed and rolled back.")
         else:
@@ -175,6 +186,8 @@ def run_import(args: argparse.Namespace) -> int:
                 target_name=args.name,
                 live_import=args.allow_live_import,
                 guid_gap=args.guid_gap if args.allow_live_import else 0,
+                backup_existing=args.backup_existing,
+                holding_account=args.holding_account,
             )
             print("Imported character:")
             print(describe_plan(plan))
