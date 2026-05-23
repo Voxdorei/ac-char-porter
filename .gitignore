@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+bundles/
+*.acchar.json
+
+*.sql
+*.log
+
+build/
+dist/
+*.egg-info/
